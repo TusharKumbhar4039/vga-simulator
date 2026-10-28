@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPGA-Controlled Variable Gain Amplifier</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f1f5f9;
+  color: #183044;
+}
+
+header {
+  background: #123b52;
+  color: white;
+  padding: 28px 20px;
+  text-align: center;
+}
+
+header h1 { margin: 0 0 10px; }
+header p { margin: 0; line-height: 1.5; }
+
+main {
+  max-width: 1050px;
+  margin: 25px auto;
+  padding: 0 15px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.card {
+  background: white;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 3px 14px #16344712;
+  border: 1px solid #dbe5eb;
+}
+
+h2 { font-size: 19px; margin-top: 0; }
+
+label {
+  display: block;
+  font-weight: bold;
+  margin: 16px 0 8px;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: #167b91;
+}
+
+button {
+  border: 1px solid #b8cbd5;
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: #f5f9fb;
+  cursor: pointer;
+  margin: 4px 3px 4px 0;
+}
+
+button.active, button:hover {
+  background: #167b91;
+  color: white;
+}
+
+.reading {
+  background: #edf5f7;
+  padding: 12px;
+  border-radius: 9px;
+  margin: 10px 0;
+}
+
+.reading span {
+  float: right;
+  font-weight: bold;
+  color: #087b70;
+}
+
+.small {
+  color: #607580;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+#sun {
+  width: 65px;
+  height: 65px;
+  border-radius: 50%;
+  margin: 20px auto;
+  background: #ffc95d;
+  box-shadow: 0 0 35px #ffc95d;
+  transition: all 0.2s;
+}
+
+.signal-flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.node {
+  padding: 14px 8px;
+  text-align: center;
+  border: 1px solid #cbdde4;
+  border-radius: 10px;
+  background: #f8fbfc;
+  font-size: 13px;
+}
+
+.node strong { display: block; margin-bottom: 6px; }
+
+/* ---------- Servo motor (top view, SVG) ---------- */
+#servoSvg {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  margin: 10px auto 6px;
+}
+
+#horn {
+  transform-origin: 190px 130px;
+  transition: transform 0.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #horn { transition: none; }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th, td {
+  text-align: left;
+  padding: 10px 7px;
+  border-bottom: 1px solid #dce5e9;
+}
+
+footer {
+  text-align: center;
+  color: #607580;
+  padding: 20px;
+  font-size: 12px;
+}
+</style>
+</head>
+
+<body>
+<header>
+  <h1>FPGA-Controlled Variable Gain Amplifier</h1>
+  <p>Interactive mini-project simulation</p>
+  <p>BPW34 Sensor → Signal Conditioning → FPGA → CD4051 → VGA → ESP32 → Servo</p>
+</header>
+
+<main>
+  <div class="grid">
+
+    <section class="card">
+      <h2>1. BPW34 Light Sensor</h2>
+      <p class="small">
+        Adjust the simulated illuminance. The model maps 0–10,000 lux
+        to the specified sensor voltage range of 1.7–320 mV.
+      </p>
+
+      <div id="sun"></div>
+
+      <label for="lux">Light intensity: <span id="luxText">5000 lux</span></label>
+      <input id="lux" type="range" min="0" max="10000"
+             step="100" value="5000">
+
+      <div>
+        <button data-lux="0">Dark</button>
+        <button data-lux="2500">Low</button>
+        <button data-lux="5000">Medium</button>
+        <button data-lux="10000">Bright</button>
+      </div>
+
+      <div class="reading">
+        Sensor voltage <span id="sensor">160.85 mV</span>
+      </div>
+
+      <div class="reading">
+        Conditioned voltage <span id="conditioned">0.50 V</span>
+      </div>
+
+      <p class="small">
+        The buffer reduces loading. The scaling amplifier has a gain
+        of 3.125, making 320 mV approximately 1 V.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>2. FPGA Gain Selection</h2>
+      <p class="small">
+        Automatic mode uses the conditioned voltage to select one
+        of four gain settings. Manual mode lets you test each setting.
+      </p>
+
+      <button id="autoBtn" class="active">Automatic</button>
+      <button id="manualBtn">Manual</button>
+
+      <label>Selected gain</label>
+      <div id="gainButtons">
+        <button data-gain="0">1.5×</button>
+        <button data-gain="1">3×</button>
+        <button data-gain="2">4.5×</button>
+        <button data-gain="3">6×</button>
+      </div>
+
+      <div class="reading">
+        FPGA select lines <span id="bits">SEL0=1, SEL1=0</span>
+      </div>
+
+      <div class="reading">
+        Selected gain <span id="gain">3×</span>
+      </div>
+
+      <div class="reading">
+        VGA fixed input <span>0.50 V</span>
+      </div>
+
+      <div class="reading">
+        Ideal VGA output <span id="output">1.50 V</span>
+      </div>
+
+      <div class="reading">
+        Output status <span id="status">Within range</span>
+      </div>
+
+      <p class="small">
+        SEL0/SEL1 codes are 00, 10, 01 and 11, respectively,
+        for gains 1.5×, 3×, 4.5× and 6×.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>3. ESP32 and Servo Motor</h2>
+
+      <div class="reading">
+        ESP32 ADC input <span id="adc">1.50 V</span>
+      </div>
+
+      <div class="reading">
+        Servo angle <span id="angle">45°</span>
+      </div>
+
+      <svg id="servoSvg" viewBox="0 0 330 225" role="img"
+           aria-label="Hobby servo motor with a solar panel mounted on its rotating shaft">
+        <defs>
+          <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3a4a55"/>
+            <stop offset="1" stop-color="#1f2b33"/>
+          </linearGradient>
+          <linearGradient id="cellGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#2d5fa8"/>
+            <stop offset="1" stop-color="#14305e"/>
+          </linearGradient>
+          <linearGradient id="hornGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#f8f4ea"/>
+            <stop offset="1" stop-color="#d9d2bf"/>
+          </linearGradient>
+        </defs>
+
+        <!-- angle scale -->
+        <g stroke="#7a8c96" stroke-width="2" stroke-linecap="round">
+          <line x1="190" y1="34" x2="190" y2="24"/>
+          <line x1="258" y1="62" x2="265" y2="55"/>
+          <line x1="286" y1="130" x2="296" y2="130"/>
+          <line x1="258" y1="198" x2="265" y2="205"/>
+        </g>
+        <path d="M190 34 A96 96 0 0 1 258 198" fill="none"
+              stroke="#c5d2d9" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <g font-size="11" fill="#607580" text-anchor="middle"
+           font-family="Arial, sans-serif">
+          <text x="190" y="14">0°</text>
+          <text x="277" y="46">45°</text>
+          <text x="312" y="134">90°</text>
+          <text x="277" y="220">135°</text>
+        </g>
+
+        <!-- wires -->
+        <g fill="none" stroke-width="4" stroke-linecap="round">
+          <path d="M30 128 H8" stroke="#8a4b22"/>
+          <path d="M30 139 H8" stroke="#d93a2b"/>
+          <path d="M30 150 H8" stroke="#e8a317"/>
+        </g>
+
+        <!-- mounting tabs -->
+        <rect x="14" y="118" width="26" height="40" rx="3" fill="#2a363e"/>
+        <rect x="220" y="118" width="26" height="40" rx="3" fill="#2a363e"/>
+        <circle cx="26" cy="138" r="4" fill="#0e161b"/>
+        <circle cx="234" cy="138" r="4" fill="#0e161b"/>
+
+        <!-- case -->
+        <rect x="36" y="105" width="190" height="66" rx="5" fill="url(#bodyGrad)"/>
+        <rect x="36" y="105" width="190" height="66" rx="5" fill="none"
+              stroke="#0e161b" stroke-width="1.5"/>
+        <rect x="52" y="122" width="82" height="32" rx="3" fill="#cdd6db"/>
+        <text x="93" y="143" font-size="12" font-weight="bold" text-anchor="middle"
+              fill="#2a363e" font-family="Arial, sans-serif">SERVO</text>
+
+        <!-- output shaft collar -->
+        <circle cx="190" cy="130" r="20" fill="#18232a"/>
+        <circle cx="190" cy="130" r="16" fill="#2c3a43"/>
+
+        <!-- rotating horn -->
+        <g id="horn">
+          <!-- horn arm -->
+          <rect x="178" y="125" width="84" height="10" rx="5" fill="url(#hornGrad)"
+                stroke="#8f8774" stroke-width="1"/>
+          <circle cx="232" cy="130" r="2.5" fill="#6f6857"/>
+          <circle cx="216" cy="130" r="2.5" fill="#6f6857"/>
+
+          <!-- solar panel mounted across the end of the horn -->
+          <rect x="252" y="96" width="20" height="68" rx="2" fill="#aeb9c0"
+                stroke="#6c7a83" stroke-width="1"/>
+          <rect x="255" y="99" width="14" height="62" fill="url(#cellGrad)"/>
+          <g stroke="#9fc0e8" stroke-width="0.8" opacity="0.8">
+            <line x1="262" y1="99" x2="262" y2="161"/>
+            <line x1="255" y1="109.3" x2="269" y2="109.3"/>
+            <line x1="255" y1="119.7" x2="269" y2="119.7"/>
+            <line x1="255" y1="130" x2="269" y2="130"/>
+            <line x1="255" y1="140.3" x2="269" y2="140.3"/>
+            <line x1="255" y1="150.7" x2="269" y2="150.7"/>
+          </g>
+          <rect x="257" y="101" width="3" height="58" fill="#ffffff" opacity="0.18"/>
+
+          <!-- hub -->
+          <circle cx="190" cy="130" r="11" fill="url(#hornGrad)" stroke="#8f8774"/>
+          <circle cx="190" cy="130" r="3.5" fill="#6f6857"/>
+        </g>
+      </svg>
+
+      <p class="small" id="servoMessage">
+        The simulated servo moves according to the VGA output voltage.
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Output voltage</th><th>Servo angle</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>≤ 0.75 V</td><td>0°</td></tr>
+          <tr><td>> 0.75–1.5 V</td><td>45°</td></tr>
+          <tr><td>> 1.5–2.25 V</td><td>90°</td></tr>
+          <tr><td>> 2.25–3.0 V</td><td>135°</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </div>
+
+  <section class="card" style="margin-top:20px">
+    <h2>4. System Signal Flow</h2>
+    <div class="signal-flow">
+      <div class="node"><strong>BPW34</strong>Light to photocurrent</div>
+      <div class="node"><strong>10 kΩ</strong>Current to voltage</div>
+      <div class="node"><strong>Buffer + scaler</strong>Voltage conditioning</div>
+      <div class="node"><strong>Arty A7 FPGA</strong>ADC range to select bits</div>
+      <div class="node"><strong>CD4051</strong>Feedback resistor selection</div>
+      <div class="node"><strong>VGA</strong>Four gain settings</div>
+      <div class="node"><strong>ESP32</strong>ADC measurement</div>
+      <div class="node"><strong>Servo</strong>Angle control</div>
+    </div>
+
+    <p class="small" style="margin-top:18px">
+      This is a mathematical demonstration, not a circuit-accurate
+      simulation or a connection to live hardware. The assumed linear
+      lux-to-voltage mapping must be calibrated using measurements.
+      Confirm the CD4051 voltage limits, FPGA ADC arrangement and
+      amplifier output swing before connecting the physical circuit.
+    </p>
+
+    <button id="resetBtn">Reset simulation</button>
+  </section>
+</main>
+
+<footer>
+  FPGA Variable Gain Amplifier · Interactive project demonstration ·
+  All displayed readings are simulated.
+</footer>
+
+<script>
+(() => {
+  const luxSlider = document.getElementById("lux");
+  const gainButtons = [...document.querySelectorAll("[data-gain]")];
+
+  const gains = [1.5, 3, 4.5, 6];
+  const selectCodes = [
+    ["0", "0"],
+    ["1", "0"],
+    ["0", "1"],
+    ["1", "1"]
+  ];
+
+  let manualMode = false;
+  let manualGain = 1;
+
+  const fmt = (number, digits = 2) => number.toFixed(digits);
+
+  function update() {
+    const lux = Number(luxSlider.value);
+
+    // Illustrative linear model based on the specified endpoints.
+    const sensorMv = 1.7 + (lux / 10000) * (320 - 1.7);
+    const conditionedV = sensorMv / 1000 * 3.125;
+
+    // Four FPGA voltage ranges.
+    let gainIndex =
+      conditionedV < 0.25 ? 0 :
+      conditionedV < 0.50 ? 1 :
+      conditionedV < 0.75 ? 2 : 3;
+
+    if (manualMode) gainIndex = manualGain;
+
+    const gain = gains[gainIndex];
+    const idealOutput = 0.5 * gain;
+    const output = Math.min(idealOutput, 3.0);
+    const clipped = idealOutput > 3.0;
+
+    const angle =
+      output <= 0.75 ? 0 :
+      output <= 1.50 ? 45 :
+      output <= 2.25 ? 90 : 135;
+
+    document.getElementById("luxText").textContent = lux + " lux";
+    document.getElementById("sensor").textContent =
+      fmt(sensorMv) + " mV";
+    document.getElementById("conditioned").textContent =
+      fmt(conditionedV) + " V";
+
+    document.getElementById("gain").textContent = gain + "×";
+    document.getElementById("bits").textContent =
+      "SEL0=" + selectCodes[gainIndex][0] +
+      ", SEL1=" + selectCodes[gainIndex][1];
+
+    document.getElementById("output").textContent =
+      fmt(output) + " V";
+    document.getElementById("adc").textContent =
+      fmt(output) + " V";
+    document.getElementById("angle").textContent = angle + "°";
+
+    document.getElementById("status").textContent =
+      clipped ? "Above 3 V target" : "Within range";
+
+    document.getElementById("servoMessage").textContent =
+      "At " + fmt(output) + " V, the simulated servo command is " +
+      angle + " degrees.";
+
+    // The horn's resting orientation is -90 degrees for 0° command.
+    document.getElementById("horn").style.transform =
+      "rotate(" + (angle - 90) + "deg)";
+
+    // Show changing light intensity.
+    const brightness = 0.25 + (lux / 10000) * 0.75;
+    const glow = 10 + (lux / 10000) * 45;
+    const sun = document.getElementById("sun");
+    sun.style.opacity = brightness;
+    sun.style.boxShadow = "0 0 " + glow + "px #ffc95d";
+
+    gainButtons.forEach(button => {
+      const selected = Number(button.dataset.gain) === gainIndex;
+      button.classList.toggle("active", selected);
+      button.disabled = !manualMode;
+      button.style.opacity = manualMode ? "1" : "0.65";
+    });
+  }
+
+  luxSlider.addEventListener("input", update);
+
+  document.querySelectorAll("[data-lux]").forEach(button => {
+    button.addEventListener("click", () => {
+      luxSlider.value = button.dataset.lux;
+      update();
+    });
+  });
+
+  document.getElementById("autoBtn").addEventListener("click", () => {
+    manualMode = false;
+    document.getElementById("autoBtn").classList.add("active");
+    document.getElementById("manualBtn").classList.remove("active");
+    update();
+  });
+
+  document.getElementById("manualBtn").addEventListener("click", () => {
+    manualMode = true;
+    document.getElementById("manualBtn").classList.add("active");
+    document.getElementById("autoBtn").classList.remove("active");
+    update();
+  });
+
+  gainButtons.forEach(button => {
+    button.addEventListener("click", () => {
+      if (!manualMode) return;
+      manualGain = Number(button.dataset.gain);
+      update();
+    });
+  });
+
+  document.getElementById("resetBtn").addEventListener("click", () => {
+    luxSlider.value = 5000;
+    manualMode = false;
+    manualGain = 1;
+    document.getElementById("autoBtn").classList.add("active");
+    document.getElementById("manualBtn").classList.remove("active");
+    update();
+  });
+
+  update();
+})();
+</script>
+</body>
+</html>
